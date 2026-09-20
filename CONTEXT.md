@@ -11,7 +11,7 @@ The root folder that holds every video the app knows about. There is exactly one
 _Avoid_: collection, media folder, root
 
 **Category**:
-A top-level folder of the library. Categories are discovered, never configured.
+A top-level folder of the library. Categories are discovered, never configured; only their order can be set.
 _Avoid_: section, genre, tab
 
 **Item**:

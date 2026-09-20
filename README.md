@@ -9,7 +9,7 @@ cargo build
 ./target/debug/omavision --windowed --root /path/to/library
 ```
 
-The first launch writes `~/.config/omavision/config.toml` with every setting documented. Set `library.root` there and drop the `--root` flag. `--windowed` overrides `ui.fullscreen` for one launch.
+The first launch writes `~/.config/omavision/config.toml` with every setting documented. Set `library.root` there and drop the `--root` flag. `library.order` lists the categories to show first; the rest follow alphabetically. `--windowed` overrides `ui.fullscreen` for one launch.
 
 ## Metadata
 

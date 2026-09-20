@@ -19,6 +19,7 @@ pub struct Library {
     pub root: String,
     pub cache_dir: String,
     pub extensions: Vec<String>,
+    pub order: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -56,6 +57,7 @@ impl Default for Library {
             root: String::new(),
             cache_dir: "{root}/.omavision".into(),
             extensions: ["mp4", "mkv", "avi", "m4v", "webm", "mov"].map(String::from).to_vec(),
+            order: vec![],
         }
     }
 }
@@ -171,6 +173,7 @@ mod tests {
         assert_eq!(t.library.root, d.library.root);
         assert_eq!(t.library.cache_dir, d.library.cache_dir);
         assert_eq!(t.library.extensions, d.library.extensions);
+        assert_eq!(t.library.order, d.library.order);
         assert_eq!(t.player.command, d.player.command);
         assert_eq!(t.player.pre, d.player.pre);
         assert_eq!(t.player.post, d.player.post);

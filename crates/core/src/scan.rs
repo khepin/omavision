@@ -22,12 +22,17 @@ pub fn scan(config: &Config) -> Result<Index> {
         .map(|e| e.file_name().to_string_lossy().to_string())
         .filter(|n| !n.starts_with('.'))
         .collect();
-    dirs.sort_by_key(|n| n.to_lowercase());
+    dirs.sort_by_key(|n| (rank(&config.library.order, n), n.to_lowercase()));
     for name in dirs {
         let items = scan_category(config, &root, &name);
         categories.push(Category { id: name.clone(), label: label_for(&name), items });
     }
     Ok(Index { scanned_at: crate::now(), categories })
+}
+
+/// Position in the configured order, with unlisted categories after every listed one.
+fn rank(order: &[String], name: &str) -> usize {
+    order.iter().position(|o| o.eq_ignore_ascii_case(name)).unwrap_or(order.len())
 }
 
 fn scan_category(config: &Config, root: &Path, cat: &str) -> Vec<Item> {
@@ -121,6 +126,21 @@ mod tests {
         assert_eq!(friends.seasons.len(), 2);
         assert_eq!(friends.seasons[0].episodes[0].episode, 1);
         assert_eq!(friends.episode_count(), 3);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn configured_order_comes_first_then_alphabetical() {
+        let dir = std::env::temp_dir().join(format!("omv-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for c in ["concerts", "divers", "films", "series"] {
+            touch(&dir.join(c).join("x.mkv"));
+        }
+        let mut c = Config::default();
+        c.library.root = dir.to_string_lossy().to_string();
+        c.library.order = ["Films", "series", "missing"].map(String::from).to_vec();
+        let idx = scan(&c).unwrap();
+        assert_eq!(idx.categories.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["films", "series", "concerts", "divers"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

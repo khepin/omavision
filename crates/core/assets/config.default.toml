@@ -22,6 +22,10 @@ cache_dir = "{root}/.omavision"
 # File extensions that count as video.
 extensions = ["mp4", "mkv", "avi", "m4v", "webm", "mov"]
 
+# Folder names of the categories to show first, in this order. Categories not
+# listed here follow, alphabetically. Empty means all alphabetical.
+order = []
+
 [player]
 # The player command, as an argv array. The file path is appended as the last
 # argument. Anything about subtitles, audio or quality belongs in mpv's own
