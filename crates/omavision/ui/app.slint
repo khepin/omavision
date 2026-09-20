@@ -4,9 +4,9 @@ import "../fonts/IBMPlexMono-Bold.ttf";
 import "../fonts/IBMPlexMono-Italic.ttf";
 import "../fonts/Alegreya[wght].ttf";
 
-export struct Row { id: string, num: string, title: string, year: string, is-show: bool, note: string }
+export struct Row { id: string, num: string, title: string, year: string, is-show: bool, note: string, code: string, heading: bool }
 export struct Tab { id: string, label: string, count: string }
-export struct Card { label: string, title: string, original: string, facts: string, genres: string, note: string, note-italic: bool, poster: image, has-poster: bool }
+export struct Card { label: string, title: string, original: string, facts: string, genres: string, note: string, note-italic: bool, poster: image, has-poster: bool, episode: string }
 
 // The colours below are defaults only: Palette::builtin() overwrites every one at startup.
 export global Theme {
@@ -42,6 +42,8 @@ export component MainWindow inherits Window {
     in-out property <[Row]> rows;
     in-out property <int> selected;
     in-out property <string> filter;
+    // Title of the open show, empty in the list.
+    in-out property <string> crumb;
     in-out property <string> count-label;
     in-out property <Card> card;
     in-out property <string> status;
@@ -53,11 +55,12 @@ export component MainWindow inherits Window {
 
     property <length> row-h: Theme.px(28);
 
+    // Keeps the selected line on screen with one line of context above and below it.
     public function ensure-visible() {
-        if (root.selected * row-h < -list.content-y) {
-            list.content-y = -root.selected * row-h;
-        } else if ((root.selected + 1) * row-h > -list.content-y + list.visible-height) {
-            list.content-y = -((root.selected + 1) * row-h - list.visible-height);
+        if ((root.selected - 1) * row-h < -list.content-y) {
+            list.content-y = -max(0, root.selected - 1) * row-h;
+        } else if ((root.selected + 2) * row-h > -list.content-y + list.visible-height) {
+            list.content-y = -min((root.selected + 2) * row-h, root.rows.length * row-h) + list.visible-height;
         }
     }
 
@@ -77,9 +80,9 @@ export component MainWindow inherits Window {
             spacing: Theme.px(8);
             Text { text: ">"; color: Theme.accent; vertical-alignment: center; }
             Text {
-                text: root.filter == "" ? "type to filter" : root.filter;
-                color: root.filter == "" ? Theme.text2 : Theme.text;
-                font-italic: root.filter == "";
+                text: root.crumb != "" ? "Enter plays · Esc returns to the list" : root.filter == "" ? "type to filter" : root.filter;
+                color: root.filter == "" || root.crumb != "" ? Theme.text2 : Theme.text;
+                font-italic: root.filter == "" || root.crumb != "";
                 vertical-alignment: center;
                 horizontal-stretch: 1;
             }
@@ -87,7 +90,7 @@ export component MainWindow inherits Window {
                 width: Theme.px(2);
                 height: Theme.px(18);
                 background: Theme.accent;
-                visible: root.filter != "";
+                visible: root.filter != "" && root.crumb == "";
             }
             Text { text: root.count-label; color: Theme.text2; vertical-alignment: center; }
         }
@@ -122,6 +125,12 @@ export component MainWindow inherits Window {
                         }
                         Rectangle { height: Theme.px(2); background: i == root.active-tab ? Theme.accent : transparent; }
                     }
+                    if root.crumb != "": Text {
+                        text: "/ " + root.crumb;
+                        color: Theme.text;
+                        vertical-alignment: bottom;
+                        overflow: elide;
+                    }
                 }
 
                 list := ListView {
@@ -129,7 +138,27 @@ export component MainWindow inherits Window {
                     for r[i] in root.rows: Rectangle {
                         height: root.row-h;
                         background: i == root.selected ? Theme.accent : transparent;
-                        HorizontalLayout {
+                        if r.heading: HorizontalLayout {
+                            padding-left: Theme.px(8);
+                            padding-right: Theme.px(8);
+                            spacing: Theme.px(12);
+                            Text {
+                                text: r.title;
+                                color: Theme.text;
+                                font-weight: 700;
+                                font-size: Theme.px(12);
+                                vertical-alignment: bottom;
+                            }
+                            Text {
+                                text: r.note;
+                                color: Theme.text2;
+                                font-size: Theme.px(11);
+                                vertical-alignment: bottom;
+                                horizontal-stretch: 1;
+                            }
+                        }
+                        if r.heading: Rectangle { y: parent.height - 1px; height: 1px; background: Theme.muted; }
+                        if !r.heading: HorizontalLayout {
                             padding-left: Theme.px(8);
                             padding-right: Theme.px(8);
                             spacing: Theme.px(12);
@@ -144,6 +173,11 @@ export component MainWindow inherits Window {
                                 text: r.is-show ? "•" : " ";
                                 width: Theme.px(10);
                                 color: i == root.selected ? Theme.bg : Theme.accent2;
+                                vertical-alignment: center;
+                            }
+                            if r.code != "": Text {
+                                text: r.code;
+                                color: i == root.selected ? Theme.bg : Theme.text2;
                                 vertical-alignment: center;
                             }
                             Text {
@@ -206,6 +240,11 @@ export component MainWindow inherits Window {
                 Text { text: root.card.original; color: Theme.text2; font-size: Theme.px(12); wrap: word-wrap; visible: root.card.original != ""; }
                 Text { text: root.card.facts; color: Theme.text2; }
                 Text { text: root.card.genres; color: Theme.accent2; font-size: Theme.px(12); visible: root.card.genres != ""; }
+                if root.card.episode != "": VerticalLayout {
+                    spacing: Theme.px(8);
+                    Rule { }
+                    Text { text: root.card.episode; color: Theme.accent; font-weight: 700; wrap: word-wrap; }
+                }
                 Rectangle {
                     vertical-stretch: 1;
                     clip: true;

@@ -1,8 +1,9 @@
 //! The browse model: what is on screen, and what a key does to it. No UI types here; the
 //! binary maps keys to `Action`, renders a `View` and runs the `Effect`.
-use crate::index::{Index, Item, Kind};
+use crate::index::{Episode, Index, Item, Kind};
 use crate::meta::Meta;
 use crate::search;
+use crate::tmdb::episode_key;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -14,11 +15,15 @@ pub enum Action {
     Page(i32),
     Home,
     End,
+    /// Next tab in the list, next season inside a show.
     NextTab,
     PrevTab,
     Type(char),
+    /// Edits the filter in the list, leaves an open show.
     Backspace,
+    /// Clears the filter in the list, leaves an open show.
     Clear,
+    /// Plays a movie, flat item or episode; opens a show.
     Activate,
 }
 
@@ -36,15 +41,20 @@ pub struct Tab {
     pub count: usize,
 }
 
+/// One line of the list: an item, or inside a show a season heading or an episode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub id: String,
-    /// Position in the filtered list, from 1.
+    /// Position in the list, from 1. 0 for a heading.
     pub number: usize,
     pub title: String,
     pub year: Option<u16>,
     pub is_show: bool,
     pub episodes: usize,
+    /// `S02 · E03` for an episode line.
+    pub code: String,
+    /// A season heading: not selectable, `title` is the heading and `episodes` its count.
+    pub heading: bool,
 }
 
 /// The right-hand card, already worded. `has_poster` means one was stored in the cache.
@@ -59,6 +69,8 @@ pub struct Card {
     pub note: String,
     pub note_italic: bool,
     pub has_poster: bool,
+    /// `S02 · E03 · The One Where…` for the selected episode of an open show.
+    pub episode: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,11 +78,14 @@ pub struct View {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
     pub rows: Vec<Row>,
+    /// Index into `rows`.
     pub selected: usize,
     pub filter: String,
-    /// Rows shown out of the items in the active category.
+    /// Rows shown out of the items in the active category; episodes when a show is open.
     pub shown: usize,
     pub total: usize,
+    /// Title of the open show, empty in the list.
+    pub crumb: String,
     pub card: Card,
 }
 
@@ -84,6 +99,14 @@ pub struct Browser {
     filter: String,
     /// `(category, item)` indices into the index, after filtering.
     visible: Vec<(usize, usize)>,
+    /// The show drilled into, if any. The list selection and filter wait underneath it.
+    open: Option<Open>,
+}
+
+struct Open {
+    id: String,
+    /// Index into the show's episodes, seasons flattened in order.
+    selected: usize,
 }
 
 /// The tab that searches every category at once. Only shown when there is something to merge.
@@ -91,16 +114,23 @@ pub const ALL_TAB_ID: &str = "all";
 
 impl Browser {
     pub fn new(index: Index, meta: HashMap<String, Meta>, root: PathBuf) -> Browser {
-        let mut b = Browser { root, index, meta, active_tab: 0, selected: 0, filter: String::new(), visible: vec![] };
+        let mut b = Browser { root, index, meta, active_tab: 0, selected: 0, filter: String::new(), visible: vec![], open: None };
         b.refilter();
         b
     }
 
-    /// A fresh scan. The tab, the selection and the filter survive it.
+    /// A fresh scan. The tab, the selection, the filter and an open show survive it, unless
+    /// the show is gone.
     pub fn set_index(&mut self, index: Index, meta: HashMap<String, Meta>) {
         self.index = index;
         self.meta = meta;
         self.refilter();
+        if let Some(open) = &mut self.open {
+            match self.index.categories.iter().flat_map(|c| &c.items).find(|it| it.id == open.id) {
+                Some(show) => open.selected = open.selected.min(show.episode_count().saturating_sub(1)),
+                None => self.open = None,
+            }
+        }
     }
 
     pub fn set_meta(&mut self, item_id: String, meta: Meta) {
@@ -119,27 +149,25 @@ impl Browser {
         self.index.item_count()
     }
 
+    /// The item the card is about: the open show, else the selected line.
     pub fn selected_id(&self) -> Option<&str> {
-        self.selected_item().map(|it| it.id.as_str())
+        self.open.as_ref().map(|o| o.id.as_str()).or_else(|| self.selected_item().map(|it| it.id.as_str()))
+    }
+
+    pub fn is_in_show(&self) -> bool {
+        self.open.is_some()
     }
 
     pub fn apply(&mut self, action: Action) -> Option<Effect> {
+        if self.open.is_some() {
+            return self.apply_in_show(action);
+        }
         let n = self.visible.len();
+        if let Some(to) = moved(self.selected, n, action) {
+            self.selected = to;
+            return None;
+        }
         match action {
-            Action::Down => {
-                if n > 0 {
-                    self.selected = (self.selected + 1).min(n - 1);
-                }
-            }
-            Action::Up => self.selected = self.selected.saturating_sub(1),
-            Action::Page(by) if by < 0 => self.selected = self.selected.saturating_sub(by.unsigned_abs() as usize),
-            Action::Page(by) => {
-                if n > 0 {
-                    self.selected = (self.selected + by as usize).min(n - 1);
-                }
-            }
-            Action::Home => self.selected = 0,
-            Action::End => self.selected = n.saturating_sub(1),
             Action::NextTab | Action::PrevTab => {
                 let count = self.tab_count();
                 if count > 0 {
@@ -167,10 +195,48 @@ impl Browser {
                 self.refilter();
             }
             Action::Activate => {
-                return self.selected_item().and_then(playable_path).map(|p| Effect::Play(self.root.join(p)));
+                let it = self.selected_item()?;
+                if it.kind == Kind::Show {
+                    self.open = Some(Open { id: it.id.clone(), selected: 0 });
+                } else if let Some(p) = &it.path {
+                    return Some(Effect::Play(self.root.join(p)));
+                }
             }
+            Action::Down | Action::Up | Action::Page(_) | Action::Home | Action::End => {}
         }
         None
+    }
+
+    fn apply_in_show(&mut self, action: Action) -> Option<Effect> {
+        let show = self.open_show()?;
+        let episodes: Vec<&Episode> = show.seasons.iter().flat_map(|s| &s.episodes).collect();
+        let n = episodes.len();
+        let selected = self.open.as_ref()?.selected;
+        let to = match action {
+            Action::NextTab | Action::PrevTab => {
+                let season = episodes.get(selected).map(|e| e.season)?;
+                let seasons: Vec<u16> = show.seasons.iter().map(|s| s.number).collect();
+                let at = seasons.iter().position(|&s| s == season)?;
+                let next = if action == Action::NextTab { at.checked_add(1).filter(|&i| i < seasons.len()) } else { at.checked_sub(1) };
+                next.and_then(|i| episodes.iter().position(|e| e.season == seasons[i]))
+            }
+            Action::Backspace | Action::Clear => {
+                self.open = None;
+                return None;
+            }
+            Action::Activate => return episodes.get(selected).map(|e| Effect::Play(self.root.join(&e.path))),
+            Action::Type(_) => None,
+            _ => moved(selected, n, action),
+        };
+        if let (Some(to), Some(open)) = (to, &mut self.open) {
+            open.selected = to;
+        }
+        None
+    }
+
+    fn open_show(&self) -> Option<&Item> {
+        let id = &self.open.as_ref()?.id;
+        self.index.categories.iter().flat_map(|c| &c.items).find(|it| &it.id == id)
     }
 
     pub fn view(&self) -> View {
@@ -179,24 +245,50 @@ impl Browser {
             tabs.push(Tab { id: ALL_TAB_ID.into(), label: "All".into(), count: self.index.item_count() });
         }
         tabs.extend(self.index.categories.iter().map(|c| Tab { id: c.id.clone(), label: c.label.clone(), count: c.items.len() }));
-        View {
+        let mut view = View {
             tabs,
             active_tab: self.active_tab,
-            rows: self
-                .visible
-                .iter()
-                .enumerate()
-                .map(|(n, &(c, i))| {
-                    let it = &self.index.categories[c].items[i];
-                    Row { id: it.id.clone(), number: n + 1, title: it.title.clone(), year: it.year, is_show: it.kind == Kind::Show, episodes: it.episode_count() }
-                })
-                .collect(),
+            rows: vec![],
             selected: self.selected,
             filter: self.filter.clone(),
             shown: self.visible.len(),
             total: self.items().len(),
+            crumb: String::new(),
             card: self.card(),
+        };
+        match (self.open_show(), &self.open) {
+            (Some(show), Some(open)) => {
+                let titles = self.meta.get(&show.id).map(|m| &m.episodes);
+                let mut number = 0;
+                for s in &show.seasons {
+                    view.rows.push(Row { id: format!("{}/S{:02}", show.id, s.number), title: format!("Season {}", s.number), episodes: s.episodes.len(), heading: true, ..Row::empty() });
+                    for e in &s.episodes {
+                        if number == open.selected {
+                            view.selected = view.rows.len();
+                        }
+                        number += 1;
+                        let key = episode_key(e.season, e.episode);
+                        let title = titles.and_then(|t| t.get(&key)).cloned().unwrap_or_default();
+                        view.rows.push(Row { id: e.path.clone(), number, title, code: episode_code(e), ..Row::empty() });
+                    }
+                }
+                view.shown = number;
+                view.total = number;
+                view.crumb = show.title.clone();
+            }
+            _ => {
+                view.rows = self
+                    .visible
+                    .iter()
+                    .enumerate()
+                    .map(|(n, &(c, i))| {
+                        let it = &self.index.categories[c].items[i];
+                        Row { id: it.id.clone(), number: n + 1, title: it.title.clone(), year: it.year, is_show: it.kind == Kind::Show, episodes: it.episode_count(), ..Row::empty() }
+                    })
+                    .collect();
+            }
         }
+        view
     }
 
     pub fn card(&self) -> Card {
@@ -205,7 +297,17 @@ impl Browser {
             return Card { note: note.into(), note_italic: true, ..Default::default() };
         };
         let category = self.visible.get(self.selected).map(|&(c, _)| self.index.categories[c].label.as_str()).unwrap_or("");
-        card_for(it, self.meta.get(&it.id), category, self.selected + 1)
+        let mut card = card_for(it, self.meta.get(&it.id), category, self.selected + 1);
+        if let (Some(show), Some(open)) = (self.open_show(), &self.open) {
+            if let Some(e) = show.seasons.iter().flat_map(|s| &s.episodes).nth(open.selected) {
+                let title = self.meta.get(&show.id).and_then(|m| m.episodes.get(&episode_key(e.season, e.episode)));
+                card.episode = match title {
+                    Some(t) => format!("{} · {t}", episode_code(e)),
+                    None => episode_code(e),
+                };
+            }
+        }
+        card
     }
 
     fn has_all_tab(&self) -> bool {
@@ -228,8 +330,9 @@ impl Browser {
         categories.filter_map(|c| self.index.categories.get(c).map(|cat| (c, cat.items.len()))).flat_map(|(c, n)| (0..n).map(move |i| (c, i))).collect()
     }
 
+    /// The open show, else the selected line of the list.
     fn selected_item(&self) -> Option<&Item> {
-        self.visible.get(self.selected).map(|&(c, i)| &self.index.categories[c].items[i])
+        self.open_show().or_else(|| self.visible.get(self.selected).map(|&(c, i)| &self.index.categories[c].items[i]))
     }
 
     fn refilter(&mut self) {
@@ -241,9 +344,28 @@ impl Browser {
     }
 }
 
-/// What Enter plays: the item's own file, or the first episode of a show.
-fn playable_path(item: &Item) -> Option<&str> {
-    item.path.as_deref().or_else(|| item.seasons.first().and_then(|s| s.episodes.first()).map(|e| e.path.as_str()))
+/// Where a movement action lands in a list of `n` lines. None when the action is not a movement.
+fn moved(selected: usize, n: usize, action: Action) -> Option<usize> {
+    let last = n.saturating_sub(1);
+    Some(match action {
+        Action::Down => (selected + 1).min(last),
+        Action::Up => selected.saturating_sub(1),
+        Action::Page(by) if by < 0 => selected.saturating_sub(by.unsigned_abs() as usize),
+        Action::Page(by) => (selected + by as usize).min(last),
+        Action::Home => 0,
+        Action::End => last,
+        _ => return None,
+    })
+}
+
+fn episode_code(e: &Episode) -> String {
+    format!("S{:02} · E{:02}", e.season, e.episode)
+}
+
+impl Row {
+    fn empty() -> Row {
+        Row { id: String::new(), number: 0, title: String::new(), year: None, is_show: false, episodes: 0, code: String::new(), heading: false }
+    }
 }
 
 /// The card for one item, with or without metadata. The only place that words it.
@@ -280,6 +402,7 @@ pub fn card_for(item: &Item, meta: Option<&Meta>, category: &str, number: usize)
         note,
         note_italic,
         has_poster: meta.and_then(|m| m.poster_file.as_deref()).is_some(),
+        episode: String::new(),
     }
 }
 
@@ -294,8 +417,9 @@ mod tests {
     }
 
     fn show(cat: &str, title: &str) -> Item {
-        let episodes = vec![Episode { season: 1, episode: 1, path: format!("{cat}/{title}/S01E01.mkv"), title: None }];
-        Item { id: format!("{cat}/{title}"), kind: Kind::Show, title: title.into(), year: None, path: None, seasons: vec![Season { number: 1, episodes }] }
+        let ep = |season, episode| Episode { season, episode, path: format!("{cat}/{title}/S{season:02}E{episode:02}.mkv"), title: None };
+        let seasons = vec![Season { number: 1, episodes: vec![ep(1, 1), ep(1, 2)] }, Season { number: 2, episodes: vec![ep(2, 1)] }];
+        Item { id: format!("{cat}/{title}"), kind: Kind::Show, title: title.into(), year: None, path: None, seasons }
     }
 
     fn library() -> Index {
@@ -337,11 +461,93 @@ mod tests {
     }
 
     #[test]
-    fn activating_a_show_plays_its_first_episode() {
+    fn activating_a_show_opens_it_on_its_first_episode() {
         let mut b = browser();
         b.apply(Action::NextTab);
         b.apply(Action::NextTab);
+        assert_eq!(b.apply(Action::Activate), None);
+        let v = b.view();
+        assert_eq!(v.crumb, "Friends");
+        assert_eq!(v.rows.iter().map(|r| (r.heading, r.number, r.code.as_str())).collect::<Vec<_>>(), vec![(true, 0, ""), (false, 1, "S01 · E01"), (false, 2, "S01 · E02"), (true, 0, ""), (false, 3, "S02 · E01")]);
+        assert_eq!((v.rows[0].title.as_str(), v.rows[0].episodes), ("Season 1", 2));
+        assert_eq!(v.selected, 1);
+        assert_eq!((v.shown, v.total), (3, 3));
+        assert_eq!(v.card.title, "Friends");
+        assert_eq!(v.card.facts, "2 seasons · 3 episodes");
+        assert_eq!(v.card.episode, "S01 · E01");
         assert_eq!(b.apply(Action::Activate), Some(Effect::Play(PathBuf::from("/lib/series/Friends/S01E01.mkv"))));
+    }
+
+    #[test]
+    fn inside_a_show_left_and_right_jump_seasons_and_movement_skips_headings() {
+        let mut b = browser();
+        b.apply(Action::End);
+        b.apply(Action::Activate);
+        b.apply(Action::NextTab);
+        assert_eq!(b.view().selected, 4);
+        assert_eq!(b.apply(Action::Activate), Some(Effect::Play(PathBuf::from("/lib/series/Friends/S02E01.mkv"))));
+        b.apply(Action::NextTab);
+        assert_eq!(b.view().selected, 4);
+        b.apply(Action::PrevTab);
+        assert_eq!(b.view().selected, 1);
+        b.apply(Action::Down);
+        assert_eq!(b.view().selected, 2);
+        b.apply(Action::Down);
+        assert_eq!(b.view().selected, 4);
+        b.apply(Action::Home);
+        assert_eq!(b.view().selected, 1);
+        b.apply(Action::Page(10));
+        assert_eq!(b.view().selected, 4);
+    }
+
+    #[test]
+    fn leaving_a_show_returns_to_the_same_line_and_typing_inside_is_ignored() {
+        let mut b = browser();
+        type_in(&mut b, "fri");
+        b.apply(Action::Activate);
+        assert_eq!(b.apply(Action::Type('x')), None);
+        assert_eq!(b.view().filter, "fri");
+        assert_eq!(b.apply(Action::Clear), None);
+        let v = b.view();
+        assert_eq!(v.crumb, "");
+        assert_eq!(v.filter, "fri");
+        assert_eq!(v.rows.len(), 1);
+        assert_eq!(v.card.episode, "");
+        b.apply(Action::Activate);
+        b.apply(Action::Backspace);
+        assert_eq!(b.view().crumb, "");
+        assert_eq!(b.view().filter, "fri");
+    }
+
+    #[test]
+    fn episode_titles_come_from_metadata() {
+        let mut b = browser();
+        let mut episodes = std::collections::BTreeMap::new();
+        episodes.insert("S01E02".to_string(), "The One with the Sonogram".to_string());
+        b.set_meta("series/Friends".into(), Meta { tmdb_id: Some(1), title: "Friends".into(), episodes, ..Default::default() });
+        b.apply(Action::End);
+        b.apply(Action::Activate);
+        b.apply(Action::Down);
+        assert_eq!(b.selected_id(), Some("series/Friends"));
+        let v = b.view();
+        assert_eq!(v.rows[2].title, "The One with the Sonogram");
+        assert_eq!(v.rows[1].title, "");
+        assert_eq!(v.card.episode, "S01 · E02 · The One with the Sonogram");
+    }
+
+    #[test]
+    fn a_rescan_keeps_an_open_show_unless_it_is_gone() {
+        let mut b = browser();
+        b.apply(Action::End);
+        b.apply(Action::Activate);
+        b.apply(Action::End);
+        b.set_index(library(), HashMap::new());
+        assert_eq!(b.view().crumb, "Friends");
+        assert_eq!(b.view().selected, 4);
+        let mut index = library();
+        index.categories.truncate(1);
+        b.set_index(index, HashMap::new());
+        assert_eq!(b.view().crumb, "");
     }
 
     #[test]
@@ -360,7 +566,8 @@ mod tests {
         let mut b = browser();
         b.apply(Action::End);
         assert_eq!(b.card().label, "Card · Series No. 005");
-        assert_eq!(b.apply(Action::Activate), Some(Effect::Play(PathBuf::from("/lib/series/Friends/S01E01.mkv"))));
+        assert_eq!(b.apply(Action::Activate), None);
+        assert_eq!(b.card().label, "Card · Series No. 005");
     }
 
     #[test]

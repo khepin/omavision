@@ -102,6 +102,25 @@ fn main() -> Result<()> {
 
     let _replay = std::env::var("OMAVISION_REPLAY").ok().map(|script| replay::keys(&ui, script));
 
+    if config.ui.fullscreen {
+        keep_asking_for_fullscreen(ui.as_weak(), 20);
+    }
     ui.run()?;
     Ok(())
+}
+
+/// Asking once before show does not stick on Hyprland: its first tiled configure lands
+/// before the compositor acknowledges fullscreen, Slint's winit backend reads that as "not
+/// fullscreen" and sends an unset. Re-ask every 100 ms for the first `tries` ticks; the check
+/// reads the state the backend synced from the compositor, so this stops once it took.
+fn keep_asking_for_fullscreen(weak: slint::Weak<MainWindow>, tries: u32) {
+    slint::Timer::single_shot(std::time::Duration::from_millis(100), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        if !ui.window().is_fullscreen() {
+            ui.window().set_fullscreen(true);
+        }
+        if tries > 1 {
+            keep_asking_for_fullscreen(weak, tries - 1);
+        }
+    });
 }

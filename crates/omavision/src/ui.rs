@@ -84,7 +84,11 @@ pub fn dispatch(state: &mut AppState, ui: &MainWindow, post: &Post, msg: Msg) {
             let status = if finished { format!("{} items · metadata complete", state.browser.item_count()) } else { format!("fetching metadata {done}/{total}") };
             ui.set_status(status.into());
             if state.browser.selected_id() == Some(id.as_str()) {
-                render_card(ui, state);
+                if state.browser.is_in_show() {
+                    render(ui, state);
+                } else {
+                    render_card(ui, state);
+                }
             }
         }
         Msg::Played(outcome) => {
@@ -184,13 +188,21 @@ pub fn render(ui: &MainWindow, state: &AppState) {
             title: r.title.clone().into(),
             year: r.year.map(|y| y.to_string()).unwrap_or_default().into(),
             is_show: r.is_show,
-            note: if r.is_show { format!("{} ep.", r.episodes) } else { String::new() }.into(),
+            note: match (r.is_show, r.heading) {
+                (true, _) => format!("{} ep.", r.episodes),
+                (_, true) => format!("{} episodes", r.episodes),
+                _ => String::new(),
+            }
+            .into(),
+            code: r.code.clone().into(),
+            heading: r.heading,
         })
         .collect();
     ui.set_rows(ModelRc::new(VecModel::from(rows)));
     ui.set_selected(v.selected as i32);
     ui.set_filter(v.filter.clone().into());
-    ui.set_count_label(format!("{} / {}", v.shown, v.total).into());
+    ui.set_crumb(v.crumb.clone().into());
+    ui.set_count_label(if v.crumb.is_empty() { format!("{} / {}", v.shown, v.total) } else { format!("{} episodes", v.total) }.into());
     ui.invoke_ensure_visible();
     ui.set_card(to_card(&v.card, state.cache.as_ref()));
 }
@@ -215,6 +227,7 @@ fn to_card(card: &browse::Card, cache: Option<&Cache>) -> Card {
         note_italic: card.note_italic,
         has_poster: poster.is_some(),
         poster: poster.unwrap_or_default(),
+        episode: card.episode.clone().into(),
     }
 }
 
@@ -228,4 +241,19 @@ pub fn apply_palette(ui: &MainWindow, p: &Palette) {
     t.set_muted(c(p.muted));
     t.set_accent(c(p.accent));
     t.set_accent2(c(p.accent2));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slint::SharedString;
+
+    #[test]
+    fn replayed_keys_map_to_actions() {
+        let left: SharedString = Key::LeftArrow.into();
+        assert_eq!(action_for(&left), Some(Action::PrevTab));
+        let ret: SharedString = Key::Return.into();
+        assert_eq!(action_for(&ret), Some(Action::Activate));
+        assert_eq!(action_for("a"), Some(Action::Type('a')));
+    }
 }
