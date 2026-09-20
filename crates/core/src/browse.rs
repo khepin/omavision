@@ -78,12 +78,16 @@ pub struct Browser {
     root: PathBuf,
     index: Index,
     meta: HashMap<String, Meta>,
+    /// 0 is the All tab when there is more than one category; the rest are categories in index order.
     active_tab: usize,
     selected: usize,
     filter: String,
-    /// Indices into the active category's items, after filtering.
-    visible: Vec<usize>,
+    /// `(category, item)` indices into the index, after filtering.
+    visible: Vec<(usize, usize)>,
 }
+
+/// The tab that searches every category at once. Only shown when there is something to merge.
+pub const ALL_TAB_ID: &str = "all";
 
 impl Browser {
     pub fn new(index: Index, meta: HashMap<String, Meta>, root: PathBuf) -> Browser {
@@ -137,7 +141,7 @@ impl Browser {
             Action::Home => self.selected = 0,
             Action::End => self.selected = n.saturating_sub(1),
             Action::NextTab | Action::PrevTab => {
-                let count = self.index.categories.len();
+                let count = self.tab_count();
                 if count > 0 {
                     self.active_tab = match action {
                         Action::NextTab => (self.active_tab + 1) % count,
@@ -170,23 +174,27 @@ impl Browser {
     }
 
     pub fn view(&self) -> View {
-        let items = self.items();
+        let mut tabs = Vec::with_capacity(self.tab_count());
+        if self.has_all_tab() {
+            tabs.push(Tab { id: ALL_TAB_ID.into(), label: "All".into(), count: self.index.item_count() });
+        }
+        tabs.extend(self.index.categories.iter().map(|c| Tab { id: c.id.clone(), label: c.label.clone(), count: c.items.len() }));
         View {
-            tabs: self.index.categories.iter().map(|c| Tab { id: c.id.clone(), label: c.label.clone(), count: c.items.len() }).collect(),
+            tabs,
             active_tab: self.active_tab,
             rows: self
                 .visible
                 .iter()
                 .enumerate()
-                .map(|(n, &i)| {
-                    let it = &items[i];
+                .map(|(n, &(c, i))| {
+                    let it = &self.index.categories[c].items[i];
                     Row { id: it.id.clone(), number: n + 1, title: it.title.clone(), year: it.year, is_show: it.kind == Kind::Show, episodes: it.episode_count() }
                 })
                 .collect(),
             selected: self.selected,
             filter: self.filter.clone(),
             shown: self.visible.len(),
-            total: items.len(),
+            total: self.items().len(),
             card: self.card(),
         }
     }
@@ -196,20 +204,37 @@ impl Browser {
             let note = if self.filter.is_empty() { "Nothing here yet." } else { "No match." };
             return Card { note: note.into(), note_italic: true, ..Default::default() };
         };
-        let category = self.index.categories.get(self.active_tab).map(|c| c.label.as_str()).unwrap_or("");
+        let category = self.visible.get(self.selected).map(|&(c, _)| self.index.categories[c].label.as_str()).unwrap_or("");
         card_for(it, self.meta.get(&it.id), category, self.selected + 1)
     }
 
-    fn items(&self) -> &[Item] {
-        self.index.categories.get(self.active_tab).map(|c| c.items.as_slice()).unwrap_or(&[])
+    fn has_all_tab(&self) -> bool {
+        self.index.categories.len() > 1
+    }
+
+    fn tab_count(&self) -> usize {
+        self.index.categories.len() + usize::from(self.has_all_tab())
+    }
+
+    /// `(category, item)` for everything under the active tab, in index order.
+    fn items(&self) -> Vec<(usize, usize)> {
+        let all = self.has_all_tab();
+        let categories = if all && self.active_tab == 0 {
+            0..self.index.categories.len()
+        } else {
+            let c = self.active_tab - usize::from(all);
+            c..c + 1
+        };
+        categories.filter_map(|c| self.index.categories.get(c).map(|cat| (c, cat.items.len()))).flat_map(|(c, n)| (0..n).map(move |i| (c, i))).collect()
     }
 
     fn selected_item(&self) -> Option<&Item> {
-        self.visible.get(self.selected).and_then(|&i| self.items().get(i))
+        self.visible.get(self.selected).map(|&(c, i)| &self.index.categories[c].items[i])
     }
 
     fn refilter(&mut self) {
-        self.visible = search::filter(self.items(), &self.meta, &self.filter);
+        let q = search::fold(&self.filter);
+        self.visible = self.items().into_iter().filter(|&(c, i)| q.is_empty() || search::matches(&self.index.categories[c].items[i], self.meta.get(&self.index.categories[c].items[i].id), &q)).collect();
         if self.selected >= self.visible.len() {
             self.selected = self.visible.len().saturating_sub(1);
         }
@@ -315,7 +340,36 @@ mod tests {
     fn activating_a_show_plays_its_first_episode() {
         let mut b = browser();
         b.apply(Action::NextTab);
+        b.apply(Action::NextTab);
         assert_eq!(b.apply(Action::Activate), Some(Effect::Play(PathBuf::from("/lib/series/Friends/S01E01.mkv"))));
+    }
+
+    #[test]
+    fn the_all_tab_comes_first_and_merges_every_category() {
+        let b = browser();
+        let v = b.view();
+        assert_eq!(v.tabs.iter().map(|t| (t.id.as_str(), t.count)).collect::<Vec<_>>(), vec![("all", 5), ("films", 4), ("series", 1)]);
+        assert_eq!(v.active_tab, 0);
+        assert_eq!(v.rows.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), vec!["John Wick", "John Wick - Chapter 2", "John Wick - Chapter 3", "Ponyo", "Friends"]);
+        assert_eq!(v.rows.iter().map(|r| r.number).collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
+        assert_eq!((v.shown, v.total), (5, 5));
+    }
+
+    #[test]
+    fn the_all_tab_card_names_the_item_own_category() {
+        let mut b = browser();
+        b.apply(Action::End);
+        assert_eq!(b.card().label, "Card · Series No. 005");
+        assert_eq!(b.apply(Action::Activate), Some(Effect::Play(PathBuf::from("/lib/series/Friends/S01E01.mkv"))));
+    }
+
+    #[test]
+    fn a_single_category_has_no_all_tab() {
+        let mut index = library();
+        index.categories.truncate(1);
+        let b = Browser::new(index, HashMap::new(), PathBuf::from("/lib"));
+        assert_eq!(b.view().tabs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["films"]);
+        assert_eq!(b.view().rows.len(), 4);
     }
 
     #[test]
@@ -324,14 +378,17 @@ mod tests {
         b.apply(Action::NextTab);
         assert_eq!(b.view().active_tab, 1);
         b.apply(Action::NextTab);
+        assert_eq!(b.view().active_tab, 2);
+        b.apply(Action::NextTab);
         assert_eq!(b.view().active_tab, 0);
         b.apply(Action::PrevTab);
-        assert_eq!(b.view().active_tab, 1);
+        assert_eq!(b.view().active_tab, 2);
     }
 
     #[test]
     fn the_filter_survives_a_tab_switch() {
         let mut b = browser();
+        b.apply(Action::NextTab);
         type_in(&mut b, "friends");
         assert!(b.view().rows.is_empty());
         b.apply(Action::NextTab);
@@ -349,12 +406,13 @@ mod tests {
         type_in(&mut b, "po");
         assert_eq!(b.apply(Action::Clear), None);
         assert_eq!(b.view().filter, "");
-        assert_eq!(b.view().rows.len(), 4);
+        assert_eq!(b.view().rows.len(), 5);
     }
 
     #[test]
     fn moving_clamps_and_filtering_pulls_the_selection_back() {
         let mut b = browser();
+        b.apply(Action::NextTab);
         b.apply(Action::End);
         assert_eq!(b.view().selected, 3);
         b.apply(Action::Down);

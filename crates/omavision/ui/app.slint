@@ -32,8 +32,9 @@ export component MainWindow inherits Window {
     background: Theme.bg;
     default-font-family: "IBM Plex Mono";
     default-font-size: Theme.px(15);
-    preferred-width: 1280px;
-    preferred-height: 720px;
+    // A windowed run mirrors a 1080p TV at the configured scale.
+    preferred-width: Theme.px(1200);
+    preferred-height: Theme.px(675);
     forward-focus: keys;
 
     in-out property <[Tab]> tabs;
@@ -175,7 +176,7 @@ export component MainWindow inherits Window {
 
             // Card column
             VerticalLayout {
-                horizontal-stretch: 1;
+                width: 34%;
                 padding-left: Theme.px(18);
                 padding-top: Theme.px(10);
                 spacing: Theme.px(10);
