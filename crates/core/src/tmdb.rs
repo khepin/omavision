@@ -63,9 +63,10 @@ impl Client {
         Ok(candidates(&v))
     }
 
+    /// Details with credits and keywords appended, so one call fills everything search reads.
     pub fn details(&self, kind: MediaKind, id: u64, language: &str) -> Result<Meta> {
         let path = match kind { MediaKind::Movie => format!("/movie/{id}"), MediaKind::Tv => format!("/tv/{id}") };
-        let v = self.get(&path, &[("language", language)])?;
+        let v = self.get(&path, &[("language", language), ("append_to_response", "credits,keywords")])?;
         Ok(meta_from_details(kind, &v, language))
     }
 
@@ -137,8 +138,14 @@ pub fn encode(s: &str) -> String {
     out
 }
 
+/// The leading cast is capped so a long ensemble does not drown the search haystack.
+const CAST_LIMIT: usize = 5;
+
 pub fn meta_from_details(kind: MediaKind, v: &Value, language: &str) -> Meta {
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let names = |v: Option<&Value>| -> Vec<String> {
+        v.and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|e| e.get("name")?.as_str().map(String::from)).collect()).unwrap_or_default()
+    };
     let (title, original, date) = match kind {
         MediaKind::Movie => (s("title"), s("original_title"), s("release_date")),
         MediaKind::Tv => (s("name"), s("original_name"), s("first_air_date")),
@@ -156,7 +163,18 @@ pub fn meta_from_details(kind: MediaKind, v: &Value, language: &str) -> Meta {
         overview: s("overview"),
         runtime: runtime.filter(|r| *r > 0),
         rating: v.get("vote_average").and_then(|x| x.as_f64()).map(|x| x as f32).filter(|r| *r > 0.0),
-        genres: v.get("genres").and_then(|g| g.as_array()).map(|a| a.iter().filter_map(|g| g.get("name")?.as_str().map(String::from)).collect()).unwrap_or_default(),
+        genres: names(v.get("genres")),
+        companies: [names(v.get("production_companies")), names(v.get("networks"))].concat(),
+        people: {
+            let credits = v.get("credits");
+            let crew = credits.and_then(|c| c.get("crew")).and_then(|x| x.as_array());
+            let directors: Vec<String> = crew.map(|a| a.iter().filter(|e| e.get("job").and_then(|j| j.as_str()) == Some("Director")).filter_map(|e| e.get("name")?.as_str().map(String::from)).collect()).unwrap_or_default();
+            let cast: Vec<String> = names(credits.and_then(|c| c.get("cast"))).into_iter().take(CAST_LIMIT).collect();
+            let mut people = [names(v.get("created_by")), directors, cast].concat();
+            people.dedup();
+            people
+        },
+        keywords: names(v.get("keywords").and_then(|k| k.get("keywords").or_else(|| k.get("results")))),
         poster_url: v.get("poster_path").and_then(|p| p.as_str()).map(|p| format!("{IMAGE}{p}")),
         language: language.to_string(),
         fetched_at: crate::now(),
@@ -191,7 +209,10 @@ mod tests {
     #[test]
     fn parses_movie_details() {
         let v = json!({"id": 129, "title": "Le Voyage de Chihiro", "original_title": "千と千尋の神隠し", "release_date": "2001-07-20",
-            "overview": "Chihiro...", "runtime": 125, "vote_average": 8.5, "genres": [{"name": "Animation"}, {"name": "Familial"}], "poster_path": "/abc.jpg"});
+            "overview": "Chihiro...", "runtime": 125, "vote_average": 8.5, "genres": [{"name": "Animation"}, {"name": "Familial"}], "poster_path": "/abc.jpg",
+            "production_companies": [{"name": "Studio Ghibli"}],
+            "credits": {"cast": [{"name": "Rumi Hiiragi"}, {"name": "Miyu Irino"}], "crew": [{"name": "Hayao Miyazaki", "job": "Director"}, {"name": "Joe Hisaishi", "job": "Original Music Composer"}]},
+            "keywords": {"keywords": [{"name": "witch"}, {"name": "anime"}]}});
         let m = meta_from_details(MediaKind::Movie, &v, "fr");
         assert_eq!(m.tmdb_id, Some(129));
         assert_eq!(m.title, "Le Voyage de Chihiro");
@@ -199,15 +220,22 @@ mod tests {
         assert_eq!(m.runtime, Some(125));
         assert_eq!(m.rating, Some(8.5));
         assert_eq!(m.genres, vec!["Animation", "Familial"]);
+        assert_eq!(m.companies, vec!["Studio Ghibli"]);
+        assert_eq!(m.people, vec!["Hayao Miyazaki", "Rumi Hiiragi", "Miyu Irino"]);
+        assert_eq!(m.keywords, vec!["witch", "anime"]);
         assert_eq!(m.poster_url.as_deref(), Some("https://image.tmdb.org/t/p/w500/abc.jpg"));
     }
 
     #[test]
     fn parses_tv_details_and_season() {
-        let v = json!({"id": 1668, "name": "Friends", "original_name": "Friends", "first_air_date": "1994-09-22", "overview": "", "episode_run_time": [22], "genres": []});
+        let v = json!({"id": 1668, "name": "Friends", "original_name": "Friends", "first_air_date": "1994-09-22", "overview": "", "episode_run_time": [22], "genres": [],
+            "networks": [{"name": "NBC"}], "created_by": [{"name": "David Crane"}], "keywords": {"results": [{"name": "sitcom"}]}});
         let m = meta_from_details(MediaKind::Tv, &v, "fr");
         assert_eq!(m.runtime, Some(22));
         assert_eq!(m.year, Some(1994));
+        assert_eq!(m.companies, vec!["NBC"]);
+        assert_eq!(m.people, vec!["David Crane"]);
+        assert_eq!(m.keywords, vec!["sitcom"]);
         let s = json!({"season_number": 2, "episodes": [{"episode_number": 3, "name": "Celui qui a une bosse"}, {"episode_number": 4, "name": ""}]});
         let eps = episodes_from_season(&s);
         assert_eq!(eps.get("S02E03").map(String::as_str), Some("Celui qui a une bosse"));

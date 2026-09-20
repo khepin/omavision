@@ -2,13 +2,14 @@
 //! runs it on a worker thread and stores what comes back through the cache.
 use crate::config::Config;
 use crate::index::{Index, Item, Kind};
-use crate::meta::Meta;
+use crate::meta::{Meta, VERSION};
 use crate::tmdb::{self, Client, MediaKind};
 use anyhow::Result;
 use log::warn;
 use std::collections::HashMap;
 
-/// Items whose metadata is missing or was fetched for another first language, in index order.
+/// Items whose metadata is missing, was fetched for another first language, or was written
+/// by a build with another cache version, in index order.
 pub fn missing<'a>(index: &'a Index, have: &HashMap<String, Meta>, config: &Config) -> Vec<&'a Item> {
     let want = config.metadata.languages.first().map(String::as_str).unwrap_or("en");
     index
@@ -17,7 +18,7 @@ pub fn missing<'a>(index: &'a Index, have: &HashMap<String, Meta>, config: &Conf
         .flat_map(|c| c.items.iter())
         .filter(|it| match have.get(&it.id) {
             None => true,
-            Some(m) => m.requested != want,
+            Some(m) => m.requested != want || m.version != VERSION,
         })
         .collect()
 }
@@ -39,9 +40,10 @@ pub fn lookup(client: &Client, item: &Item, langs: &[&str]) -> Result<Meta> {
         }
     }
     let Some(id) = id else {
-        return Ok(Meta { title: item.title.clone(), year: item.year, language: first.to_string(), requested: first.to_string(), fetched_at: crate::now(), ..Default::default() });
+        return Ok(Meta { version: VERSION, title: item.title.clone(), year: item.year, language: first.to_string(), requested: first.to_string(), fetched_at: crate::now(), ..Default::default() });
     };
     let mut meta = details(client, kind, id, langs)?;
+    meta.version = VERSION;
     if meta.title.is_empty() {
         meta.title = item.title.clone();
     }
@@ -99,11 +101,23 @@ mod tests {
         let item = Item { id: "films/x.mkv".into(), kind: Kind::Movie, title: "x".into(), year: None, path: Some("films/x.mkv".into()), seasons: vec![] };
         let index = Index { scanned_at: 0, categories: vec![Category { id: "films".into(), label: "Films".into(), items: vec![item] }] };
         let mut have = HashMap::new();
-        have.insert("films/x.mkv".to_string(), Meta { requested: "fr".into(), ..Default::default() });
+        have.insert("films/x.mkv".to_string(), Meta { version: VERSION, requested: "fr".into(), ..Default::default() });
         let mut c = Config::default();
         c.metadata.languages = vec!["fr".into(), "en".into()];
         assert!(missing(&index, &have, &c).is_empty());
         c.metadata.languages = vec!["en".into(), "fr".into()];
+        assert_eq!(missing(&index, &have, &c).len(), 1);
+    }
+
+    #[test]
+    fn old_cache_version_marks_items_for_refetch() {
+        use crate::index::{Category, Kind};
+        let item = Item { id: "films/x.mkv".into(), kind: Kind::Movie, title: "x".into(), year: None, path: Some("films/x.mkv".into()), seasons: vec![] };
+        let index = Index { scanned_at: 0, categories: vec![Category { id: "films".into(), label: "Films".into(), items: vec![item] }] };
+        let mut c = Config::default();
+        c.metadata.languages = vec!["en".into()];
+        let mut have = HashMap::new();
+        have.insert("films/x.mkv".to_string(), Meta { version: VERSION - 1, requested: "en".into(), ..Default::default() });
         assert_eq!(missing(&index, &have, &c).len(), 1);
     }
 
