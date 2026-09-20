@@ -1,0 +1,56 @@
+.stage.v1{font-family:"Source Sans 3","Helvetica Neue",Arial,sans-serif;position:relative;overflow:hidden}
+.stage.v1 .backdrop{position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(90% 70% at 22% 0%, hsl(var(--hue) 55% 45% / .55), transparent 65%),
+    radial-gradient(60% 50% at 80% 10%, hsl(calc(var(--hue) + 40) 50% 35% / .35), transparent 70%),
+    linear-gradient(180deg, transparent 0%, var(--bg) 42%);
+  transition:background 150ms ease}
+.stage.v1 .hero{position:absolute;left:4rem;top:2.6rem;width:52rem;height:18.5rem;display:flex;flex-direction:column;gap:.35rem;z-index:1}
+.stage.v1 .hero .eyebrow{font-size:.9rem;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.stage.v1 .hero h1{font-family:"Bebas Neue","Anton","Oswald","Impact","Arial Narrow",sans-serif;font-weight:400;font-size:5.6rem;line-height:.92;letter-spacing:.01em;margin:0;color:var(--text);text-wrap:balance;max-height:2lh;overflow:hidden}
+.stage.v1 .hero .facts{display:flex;gap:1rem;font-size:1.05rem;color:var(--muted);font-variant-numeric:tabular-nums;align-items:baseline}
+.stage.v1 .hero .facts b{color:var(--text);font-weight:600}
+.stage.v1 .hero .facts .rating{color:var(--accent)}
+.stage.v1 .hero .synopsis{font-size:1.1rem;line-height:1.4;color:color-mix(in srgb,var(--text) 82%,transparent);max-width:44rem;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.stage.v1 .hero .synopsis.pending{color:var(--muted);font-style:italic}
+.stage.v1 .stub{position:absolute;right:4rem;top:2.6rem;z-index:1;display:flex;align-items:center;gap:.6rem;padding:.55rem 1rem;border:2px dashed var(--border);border-radius:.4rem;color:var(--muted);font-size:1rem;letter-spacing:.06em;text-transform:uppercase;background:color-mix(in srgb,var(--surface) 70%,transparent);transition:border-color 150ms,color 150ms}
+.stage.v1 .stub.active{border-color:var(--accent);color:var(--text);border-style:solid}
+.stage.v1 .stub .q{font-family:"Bebas Neue","Anton","Impact",sans-serif;font-size:1.6rem;letter-spacing:.06em;color:var(--accent);min-width:1ch}
+.stage.v1 .stub .q:empty::after{content:"tapez pour filtrer";font-family:inherit;font-size:.85rem;letter-spacing:.06em;color:var(--muted)}
+.stage.v1 .rows{position:absolute;left:0;right:0;top:22.5rem;bottom:0;overflow:hidden}
+.stage.v1 .rows-inner{display:flex;flex-direction:column;gap:2.2rem;padding-top:.4rem;transition:transform 150ms ease}
+.stage.v1 .row{display:flex;flex-direction:column;gap:.5rem}
+.stage.v1 .row.hidden{display:none}
+.stage.v1 .row h2{margin:0 0 0 4rem;font-size:.8rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);transition:color 150ms}
+.stage.v1 .row h2 .n{font-weight:400;color:color-mix(in srgb,var(--muted) 70%,transparent);margin-left:.6em;letter-spacing:.05em}
+.stage.v1 .row.active h2{color:var(--accent)}
+.stage.v1 .strip{display:flex;gap:1rem;padding:.45rem 4rem;transition:transform 150ms ease;will-change:transform}
+.stage.v1 .card{flex:0 0 9.5rem;width:9.5rem;position:relative;transition:transform 150ms ease}
+.stage.v1 .card .poster{border-radius:.35rem;box-shadow:0 .5rem 1.5rem hsl(0 0% 0% / .35)}
+.stage.v1 .card .cap{margin-top:.45rem;font-size:.9rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color 150ms}
+.stage.v1 .row.active .card.focus{transform:scale(1.14);z-index:2}
+.stage.v1 .row.active .card.focus .poster{outline:.2rem solid var(--accent);outline-offset:.15rem;box-shadow:0 1rem 2.5rem hsl(0 0% 0% / .5)}
+.stage.v1 .row.active .card.focus .cap{color:var(--text)}
+.stage.v1 .empty{position:absolute;left:4rem;top:24rem;color:var(--muted);font-size:1.4rem}
+/* show overlay */
+.stage.v1 .overlay{position:absolute;inset:0;z-index:5;background:linear-gradient(180deg,hsl(var(--hue) 45% 22% / .95),var(--bg) 55%);color:var(--text);padding:3rem 4rem;display:flex;flex-direction:column;gap:1.4rem}
+.stage.v1 .overlay .head{display:flex;gap:2rem;align-items:flex-end}
+.stage.v1 .overlay .head .poster{width:8rem;flex:0 0 8rem;border-radius:.35rem}
+.stage.v1 .overlay h1{font-family:"Bebas Neue","Anton","Impact",sans-serif;font-weight:400;font-size:4.4rem;line-height:.95;margin:0;letter-spacing:.01em}
+.stage.v1 .overlay .sub{font-size:1.05rem;color:var(--muted);margin-top:.4rem}
+.stage.v1 .overlay .sub b{color:var(--text);font-weight:600}
+.stage.v1 .overlay .hint{margin-left:auto;font-size:.85rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.stage.v1 .seasons{display:flex;gap:2rem;flex:1;min-height:0}
+.stage.v1 .season{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:.35rem;min-height:0}
+.stage.v1 .season h3{margin:0 0 .3rem;font-size:.8rem;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.stage.v1 .season.active h3{color:var(--accent)}
+.stage.v1 .eps{display:flex;flex-direction:column;gap:.2rem;overflow:hidden}
+.stage.v1 .ep{display:grid;grid-template-columns:3.2rem 1fr;gap:.6rem;align-items:baseline;padding:.32rem .6rem;border-radius:.3rem;font-size:1rem;color:color-mix(in srgb,var(--text) 80%,transparent);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage.v1 .ep .num{color:var(--muted);font-weight:600}
+.stage.v1 .ep .t{overflow:hidden;text-overflow:ellipsis}
+.stage.v1 .ep .t.none{color:var(--muted);font-style:italic}
+.stage.v1 .ep.seen{color:var(--muted)}
+.stage.v1 .ep.next .num::after{content:"▸";margin-left:.3em;color:var(--accent)}
+.stage.v1 .season.active .ep.focus{background:var(--accent);color:var(--bg)}
+.stage.v1 .season.active .ep.focus .num,.stage.v1 .season.active .ep.focus .t.none{color:var(--bg)}
+@media (prefers-reduced-motion:reduce){.stage.v1 .card,.stage.v1 .strip,.stage.v1 .rows-inner,.stage.v1 .backdrop{transition:none}}
