@@ -43,9 +43,6 @@ fn main() -> Result<()> {
     let ui = MainWindow::new()?;
     ui.global::<Theme>().set_scale(config.ui.scale);
     ui.global::<Theme>().set_attribution(tmdb::ATTRIBUTION.into());
-    if config.ui.fullscreen {
-        ui.window().set_fullscreen(true);
-    }
 
     let state = Arc::new(Mutex::new(AppState {
         browser: Browser::new(Index::default(), HashMap::new(), config.root().unwrap_or_default()),
@@ -102,6 +99,26 @@ fn main() -> Result<()> {
 
     let _replay = std::env::var("OMAVISION_REPLAY").ok().map(|script| replay::keys(&ui, script));
 
-    ui.run()?;
+    ui.show()?;
+    if config.ui.fullscreen {
+        keep_asking_for_fullscreen(ui.as_weak(), 20);
+    }
+    slint::run_event_loop()?;
+    ui.hide()?;
     Ok(())
+}
+
+/// Asking once does not stick on Wayland: the first tiled configure from Hyprland lands
+/// before the compositor acknowledges fullscreen, Slint's backend reads that as "not
+/// fullscreen" and sends an unset. Re-ask every 100 ms for the first `tries` ticks.
+fn keep_asking_for_fullscreen(weak: slint::Weak<MainWindow>, tries: u32) {
+    slint::Timer::single_shot(std::time::Duration::from_millis(100), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        if !ui.window().is_fullscreen() {
+            ui.window().set_fullscreen(true);
+        }
+        if tries > 1 {
+            keep_asking_for_fullscreen(weak, tries - 1);
+        }
+    });
 }
