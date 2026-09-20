@@ -1,0 +1,59 @@
+# Omavision settings.
+#
+# This file was written by omavision on first launch. Every key below is read on
+# the next launch; there is no other place where settings live. Edit it by hand
+# or let an agent edit it. Comments are yours to keep; omavision never rewrites
+# this file once it exists.
+#
+# Paths: `~` expands to the home directory. `{root}` expands to library.root.
+# Project docs live in the source tree under docs/: design-direction.md,
+# omarchy-theme.md and adr/ explain the decisions behind these keys.
+
+[library]
+# Absolute path of the folder that holds the media. Every top-level folder
+# inside it becomes a category (films, series, ...). Leave empty and omavision
+# shows this file's path on screen until it is set.
+root = ""
+
+# Where derived data lives: the scan index, metadata and posters.
+# Safe to delete at any time; a rescan rebuilds it.
+cache_dir = "{root}/.omavision"
+
+# File extensions that count as video.
+extensions = ["mp4", "mkv", "avi", "m4v", "webm", "mov"]
+
+[player]
+# The player command, as an argv array. The file path is appended as the last
+# argument. Anything about subtitles, audio or quality belongs in mpv's own
+# config (~/.config/mpv/mpv.conf), not here.
+command = ["mpv", "--fs", "--save-position-on-quit"]
+
+# Commands run before the player starts and after it exits, as argv arrays.
+# Use them to switch the display into and out of a movie mode, for example on
+# Omarchy. `post` always runs, even when the player fails. A failing `pre`
+# logs a warning and playback still starts. Empty arrays disable them.
+pre = []
+post = []
+
+[metadata]
+# Posters and synopses come from TMDB. Create a free API key at
+# https://www.themoviedb.org/settings/api and put it, alone, in the file below,
+# or export TMDB_API_READ_ACCESS_TOKEN or TMDB_API_KEY in the environment
+# (the environment wins). Without a key omavision shows parsed file names only.
+provider = "tmdb"
+api_key_file = "~/.config/omavision/tmdb.key"
+# Languages to try in order when fetching titles and synopses.
+languages = ["fr", "en"]
+
+[ui]
+# Size multiplier for text and spacing. 1.6 suits a TV seen from a sofa.
+scale = 1.6
+# Start fullscreen. Set false while developing on a desktop.
+# The --windowed flag overrides it for one launch.
+fullscreen = true
+# Colours follow the Omarchy theme when one is found at
+# ~/.local/state/omarchy/current/theme/colors.toml (or the older
+# ~/.config/omarchy/current/theme/colors.toml). Set a path here to use a
+# specific colors.toml instead, for example on a machine without Omarchy.
+# Empty means auto-detect, and the built-in palette when nothing is found.
+theme_file = ""

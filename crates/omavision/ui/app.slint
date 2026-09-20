@@ -1,0 +1,256 @@
+import { ListView } from "std-widgets.slint";
+import "../fonts/IBMPlexMono-Regular.ttf";
+import "../fonts/IBMPlexMono-Bold.ttf";
+import "../fonts/IBMPlexMono-Italic.ttf";
+import "../fonts/Alegreya[wght].ttf";
+
+export struct Row { id: string, num: string, title: string, year: string, is-show: bool, note: string }
+export struct Tab { id: string, label: string, count: string }
+export struct Card { label: string, title: string, original: string, facts: string, genres: string, note: string, note-italic: bool, poster: image, has-poster: bool }
+
+// The colours below are defaults only: Palette::builtin() overwrites every one at startup.
+export global Theme {
+    in-out property <float> scale: 1.6;
+    in-out property <color> bg: #1a1b26;
+    in-out property <color> surface: #24283b;
+    in-out property <color> text: #a9b1d6;
+    in-out property <color> text2: #565f89;
+    in-out property <string> attribution;
+    in-out property <color> muted: #414868;
+    in-out property <color> accent: #7aa2f7;
+    in-out property <color> accent2: #ad8ee6;
+    pure public function px(v: float) -> length { return v * 1px * scale; }
+}
+
+component Rule inherits Rectangle {
+    height: 1px;
+    background: Theme.muted;
+}
+
+export component MainWindow inherits Window {
+    title: "Omavision";
+    background: Theme.bg;
+    default-font-family: "IBM Plex Mono";
+    default-font-size: Theme.px(15);
+    preferred-width: 1280px;
+    preferred-height: 720px;
+    forward-focus: keys;
+
+    in-out property <[Tab]> tabs;
+    in-out property <int> active-tab;
+    in-out property <[Row]> rows;
+    in-out property <int> selected;
+    in-out property <string> filter;
+    in-out property <string> count-label;
+    in-out property <Card> card;
+    in-out property <string> status;
+    in-out property <bool> setup-needed;
+    in-out property <string> setup-message;
+    in-out property <bool> playing;
+
+    callback key(string) -> bool;
+
+    property <length> row-h: Theme.px(28);
+
+    public function ensure-visible() {
+        if (root.selected * row-h < -list.content-y) {
+            list.content-y = -root.selected * row-h;
+        } else if ((root.selected + 1) * row-h > -list.content-y + list.visible-height) {
+            list.content-y = -((root.selected + 1) * row-h - list.visible-height);
+        }
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (root.key(event.text)) { accept } else { reject }
+        }
+    }
+
+    VerticalLayout {
+        padding: Theme.px(18);
+        spacing: 0;
+
+        // Prompt line
+        HorizontalLayout {
+            height: Theme.px(30);
+            spacing: Theme.px(8);
+            Text { text: ">"; color: Theme.accent; vertical-alignment: center; }
+            Text {
+                text: root.filter == "" ? "type to filter" : root.filter;
+                color: root.filter == "" ? Theme.text2 : Theme.text;
+                font-italic: root.filter == "";
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Rectangle {
+                width: Theme.px(2);
+                height: Theme.px(18);
+                background: Theme.accent;
+                visible: root.filter != "";
+            }
+            Text { text: root.count-label; color: Theme.text2; vertical-alignment: center; }
+        }
+        Rule { }
+
+        HorizontalLayout {
+            spacing: 0;
+
+            // Catalog column
+            VerticalLayout {
+                horizontal-stretch: 2;
+                padding-top: Theme.px(10);
+                padding-right: Theme.px(18);
+                spacing: Theme.px(8);
+
+                HorizontalLayout {
+                    height: Theme.px(30);
+                    spacing: Theme.px(22);
+                    alignment: start;
+                    for t[i] in root.tabs: VerticalLayout {
+                        spacing: Theme.px(4);
+                        HorizontalLayout {
+                            spacing: Theme.px(6);
+                            alignment: start;
+                            Text {
+                                text: t.label;
+                                color: i == root.active-tab ? Theme.text : Theme.text2;
+                                font-weight: i == root.active-tab ? 700 : 400;
+                                vertical-alignment: bottom;
+                            }
+                            Text { text: t.count; color: Theme.text2; font-size: Theme.px(11); vertical-alignment: bottom; }
+                        }
+                        Rectangle { height: Theme.px(2); background: i == root.active-tab ? Theme.accent : transparent; }
+                    }
+                }
+
+                list := ListView {
+                    vertical-stretch: 1;
+                    for r[i] in root.rows: Rectangle {
+                        height: root.row-h;
+                        background: i == root.selected ? Theme.accent : transparent;
+                        HorizontalLayout {
+                            padding-left: Theme.px(8);
+                            padding-right: Theme.px(8);
+                            spacing: Theme.px(12);
+                            Text {
+                                text: r.num;
+                                width: Theme.px(34);
+                                color: i == root.selected ? Theme.bg : Theme.text2;
+                                font-size: Theme.px(11);
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: r.is-show ? "•" : " ";
+                                width: Theme.px(10);
+                                color: i == root.selected ? Theme.bg : Theme.accent2;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: r.title;
+                                color: i == root.selected ? Theme.bg : Theme.text;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: r.note;
+                                color: i == root.selected ? Theme.bg : Theme.text2;
+                                font-italic: true;
+                                font-size: Theme.px(12);
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: r.year;
+                                color: i == root.selected ? Theme.bg : Theme.text2;
+                                vertical-alignment: center;
+                                horizontal-alignment: right;
+                                width: Theme.px(44);
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { width: 1px; background: Theme.muted; }
+
+            // Card column
+            VerticalLayout {
+                horizontal-stretch: 1;
+                padding-left: Theme.px(18);
+                padding-top: Theme.px(10);
+                spacing: Theme.px(10);
+
+                Rectangle {
+                    width: Theme.px(200);
+                    height: Theme.px(300);
+                    background: Theme.surface;
+                    Image {
+                        width: parent.width; height: parent.height;
+                        source: root.card.poster;
+                        image-fit: cover;
+                        visible: root.card.has-poster;
+                    }
+                    Text {
+                        x: Theme.px(14); y: parent.height - self.height - Theme.px(14);
+                        width: parent.width - Theme.px(28);
+                        text: root.card.title;
+                        color: Theme.text;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                        visible: !root.card.has-poster;
+                    }
+                }
+                Text { text: root.card.label; color: Theme.text2; font-size: Theme.px(11); }
+                Text { text: root.card.title; color: Theme.text; font-weight: 700; font-size: Theme.px(18); wrap: word-wrap; }
+                Text { text: root.card.original; color: Theme.text2; font-size: Theme.px(12); wrap: word-wrap; visible: root.card.original != ""; }
+                Text { text: root.card.facts; color: Theme.text2; }
+                Text { text: root.card.genres; color: Theme.accent2; font-size: Theme.px(12); visible: root.card.genres != ""; }
+                Rectangle {
+                    vertical-stretch: 1;
+                    clip: true;
+                    Text {
+                        x: 0; y: 0;
+                        width: parent.width;
+                        text: root.card.note;
+                        color: root.card.note-italic ? Theme.text2 : Theme.text;
+                        font-italic: root.card.note-italic;
+                        font-family: "Alegreya";
+                        font-size: Theme.px(15);
+                        wrap: word-wrap;
+                    }
+                }
+                Text { text: Theme.attribution; color: Theme.text2; font-size: Theme.px(9); wrap: word-wrap; visible: Theme.attribution != ""; }
+            }
+        }
+
+        Rule { }
+        HorizontalLayout {
+            height: Theme.px(24);
+            Text { text: root.status; color: Theme.text2; font-size: Theme.px(11); vertical-alignment: center; }
+        }
+    }
+
+    if root.setup-needed: Rectangle {
+        background: Theme.bg;
+        VerticalLayout {
+            alignment: center;
+            padding: Theme.px(60);
+            spacing: Theme.px(16);
+            Text { text: "Omavision"; color: Theme.text; font-weight: 700; font-size: Theme.px(28); horizontal-alignment: center; }
+            Text {
+                text: root.setup-message;
+                color: Theme.text;
+                font-family: "Alegreya";
+                font-size: Theme.px(18);
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            Text { text: Theme.attribution; color: Theme.text2; font-size: Theme.px(10); horizontal-alignment: center; }
+        }
+    }
+
+    if root.playing: Rectangle {
+        background: Theme.bg;
+        Text { text: "playing…"; color: Theme.text2; horizontal-alignment: center; vertical-alignment: center; }
+    }
+}
